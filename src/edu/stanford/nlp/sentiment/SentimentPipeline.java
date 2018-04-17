@@ -1,4 +1,4 @@
-package edu.stanford.nlp.sentiment; 
+package edu.stanford.nlp.sentiment;
 import edu.stanford.nlp.util.logging.Redwood;
 
 import java.io.BufferedReader;
@@ -27,6 +27,12 @@ import edu.stanford.nlp.trees.Tree;
 import edu.stanford.nlp.trees.TreeCoreAnnotations;
 import edu.stanford.nlp.util.CoreMap;
 import edu.stanford.nlp.util.Generics;
+import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
+
+import java.io.*;
+import java.util.*;
 
 /**
  * A wrapper class which creates a suitable pipeline for the sentiment
@@ -343,6 +349,8 @@ public class SentimentPipeline  {
     StanfordCoreNLP tokenizer = (tokenizerProps == null) ? null : new StanfordCoreNLP(tokenizerProps);
     StanfordCoreNLP pipeline = new StanfordCoreNLP(pipelineProps);
 
+    CSVPrinter csvFilePrinter = createCSVPrinter("activations.csv", 25);
+
     if (filename != null) {
       // Process a file.  The pipeline will do tokenization, which
       // means it will split it into sentences as best as possible
@@ -354,6 +362,7 @@ public class SentimentPipeline  {
         for (CoreMap sentence : annotation.get(CoreAnnotations.SentencesAnnotation.class)) {
           System.out.println(sentence);
           outputTree(System.out, sentence, outputFormats);
+          storeTreeVectors(sentence, csvFilePrinter);
         }
       }
     } else if (fileList != null) {
@@ -371,6 +380,7 @@ public class SentimentPipeline  {
           for (CoreMap sentence : annotation.get(CoreAnnotations.SentencesAnnotation.class)) {
             pout.println(sentence);
             outputTree(pout, sentence, outputFormats);
+            storeTreeVectors(sentence, csvFilePrinter);
           }
         }
         pout.flush();
@@ -390,6 +400,7 @@ public class SentimentPipeline  {
           pipeline.annotate(annotation);
           for (CoreMap sentence : annotation.get(CoreAnnotations.SentencesAnnotation.class)) {
             outputTree(System.out, sentence, outputFormats);
+            storeTreeVectors(sentence, csvFilePrinter);
           }
         } else {
           // Output blank lines for blank lines so the tool can be
@@ -398,6 +409,43 @@ public class SentimentPipeline  {
         }
       }
 
+    }
+
+    csvFilePrinter.flush();
+    csvFilePrinter.close();
+  }
+
+  private static CSVPrinter createCSVPrinter(String filepath, int numActivations) throws IOException {
+    String[] headers = new String[3 + numActivations];
+    headers[0] = "sentence";
+    headers[1] = "node.type";
+    headers[2] = "node.string";
+    for (int i = 0; i < numActivations; i++) {
+      headers[i + 3] = "activation" + String.valueOf(i);
+    }
+
+    CSVFormat format = CSVFormat.DEFAULT.withHeader(headers);
+    FileWriter fileWriter = new FileWriter(filepath, false);
+    return new CSVPrinter(fileWriter, format);
+  }
+
+  private static void storeTreeVectors(CoreMap sentence, CSVPrinter csvFilePrinter) throws IOException {
+    Tree tree = sentence.get(SentimentCoreAnnotations.SentimentAnnotatedTree.class);
+
+    for (Tree node : tree) {
+      SimpleMatrix nodeVector = ((CoreLabel) node.label()).get(RNNCoreAnnotations.NodeVector.class);
+      if (nodeVector == null) {
+        continue;
+      }
+      String nodeString = node.toString();
+      String nodeType = node.label().toString();
+      double[] activations = nodeVector.getMatrix().data;
+      ArrayList<Object> record = new ArrayList<>();
+      record.add(sentence.toString());
+      record.add(nodeType);
+      record.add(nodeString);
+      record.addAll(Arrays.asList(ArrayUtils.toObject(activations)));
+      csvFilePrinter.printRecord(record);
     }
   }
 
